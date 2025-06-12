@@ -10,8 +10,8 @@ import sounddevice
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent, TranscriptResultStream
-
 from silero_vad import load_silero_vad
+
 from src.config import config
 from src.constant import SAMPLE_RATE, CHUNK_SIZE
 from src.llm import BedrockLLM
