@@ -27,6 +27,10 @@ logger.info(f"LANG_CODE: {LANG_CODE}")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
 logger.info("Environment configuration", environment=ENVIRONMENT)
 
+# TTS
+VOICE_ID = os.environ.get("VOICE_ID", "Seoyeon")  # 지혜 목소리
+logger.info(f"VOICE_ID: {VOICE_ID}")
+
 
 @dataclass
 class Config:
@@ -35,6 +39,7 @@ class Config:
     model_id: str
     lang_code: str
     environment: str
+    voice_id: str
 
 
 config = Config(
@@ -43,4 +48,5 @@ config = Config(
     model_id=MODEL_ID,
     lang_code=LANG_CODE,
     environment=ENVIRONMENT,
+    voice_id=VOICE_ID,
 )

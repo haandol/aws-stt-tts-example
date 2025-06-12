@@ -10,6 +10,7 @@ dependencies = [
     "langchain>=0.3.25",
     "langchain-aws>=0.2.25",
     "numpy>=1.24.0",
+    "pygame>=2.6.1",
     "python-dotenv>=1.1.0",
     "silero-vad>=5.1.2",
     "sounddevice>=0.5.2",

@@ -14,6 +14,7 @@ from silero_vad import load_silero_vad
 from src.config import config
 from src.constant import SAMPLE_RATE, CHUNK_SIZE
 from src.llm import BedrockLLM
+from src.tts import PollyTTS
 from src.logger import logger
 
 logger.info("🔍 환경 변수 로드 완료", config=config)
@@ -63,9 +64,10 @@ def detect_voice_activity(audio_chunk, threshold=0.5):
 
 
 class MyEventHandler(TranscriptResultStreamHandler):
-    def __init__(self, transcript_result_stream: TranscriptResultStream, llm: BedrockLLM):
+    def __init__(self, transcript_result_stream: TranscriptResultStream, llm: BedrockLLM, tts: PollyTTS):
         super().__init__(transcript_result_stream)
         self.llm = llm
+        self.tts = tts
         self.is_listening = False
         self.voice_buffer = []  # 음성 버퍼
         self.silence_counter = 0  # 무음 카운터
@@ -112,6 +114,9 @@ class MyEventHandler(TranscriptResultStreamHandler):
                 self.messages.append({"role": "assistant", "content": ai_response})
 
                 logger.info(f"🤖 AI: {ai_response}")
+
+                # TTS로 AI 응답을 음성으로 재생 (지혜 목소리 사용)
+                await self.tts.speak_async(ai_response, voice_id=config.voice_id)
 
 
 async def mic_stream_with_vad(sample_rate, chunk_size):
@@ -173,6 +178,7 @@ async def write_chunks(stream):
 
 async def basic_transcribe(
     llm: BedrockLLM,
+    tts: PollyTTS,
     sample_rate: int,
     lang_code: str,
 ):
@@ -187,7 +193,7 @@ async def basic_transcribe(
     logger.info("🎙️ VAD 기반 마이크 스트리밍 채널이 열렸습니다. 말씀해 주세요.")
 
     # Instantiate our handler and start processing events
-    handler = MyEventHandler(stream.output_stream, llm)
+    handler = MyEventHandler(stream.output_stream, llm, tts)
     await asyncio.gather(write_chunks(stream), handler.handle_events())
 
 
@@ -202,6 +208,9 @@ if __name__ == "__main__":
         aws_profile_name=config.aws_profile,
     )
 
+    # TTS 초기화 (지혜 목소리 사용)
+    tts = PollyTTS(aws_profile_name=config.aws_profile)
+
     # 새 이벤트 루프 명시적으로 설정
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -210,6 +219,7 @@ if __name__ == "__main__":
         loop.run_until_complete(
             basic_transcribe(
                 llm=llm,
+                tts=tts,
                 sample_rate=SAMPLE_RATE,
                 lang_code=config.lang_code,
             )
