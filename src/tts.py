@@ -1,66 +1,67 @@
-import boto3
-import io
 import asyncio
 from typing import Optional
+
+import boto3
 import numpy as np
 import sounddevice as sd
-from src.logger import logger
+
 from src.config import config
+from src.logger import logger
 
 
 class PollyTTS:
-    def __init__(self, aws_profile_name: Optional[str] = None):
+    def __init__(self, voice_id: str, aws_profile: Optional[str] = None):
         """
         Amazon Polly를 사용한 TTS 클래스 초기화
 
         Args:
+            voice_id: 사용할 음성 ID
             aws_profile_name: AWS 프로파일 이름 (선택사항)
         """
-        logger.info("🔊 Polly TTS 초기화", aws_profile_name=aws_profile_name)
+        logger.info("🔊 Polly TTS 초기화", voice_id=voice_id, aws_profile=aws_profile)
 
         # AWS 세션 생성
-        if aws_profile_name:
-            session = boto3.Session(profile_name=aws_profile_name)
+        if aws_profile:
+            session = boto3.Session(profile_name=aws_profile)
         else:
-            session = boto3.Session()
+            session = boto3.Session(region_name=config.aws_default_region)
 
         # Polly 클라이언트 생성
-        self.polly_client = session.client("polly", region_name=config.aws_default_region or "us-east-1")
+        self.polly_client = session.client("polly")
+        self.voice_id = voice_id
 
         logger.info("✅ Polly TTS가 초기화되었습니다.")
 
-    async def speak_async(self, text: str, voice_id: str) -> None:
+    async def speak_async(self, text: str) -> None:
         """
         비동기적으로 텍스트를 음성으로 변환하고 재생
 
         Args:
             text: 변환할 텍스트
-            voice_id: 사용할 음성 ID (기본값: config에서 설정된 값 사용)
         """
         try:
-            logger.info("🔊 음성 변환 시작", text=text[:50] + "..." if len(text) > 50 else text, voice_id=voice_id)
+            logger.info("🔊 음성 변환 시작", text=text[:50] + "..." if len(text) > 50 else text)
 
             # 비동기 처리를 위해 별도 스레드에서 실행
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._synthesize_and_play, text, voice_id)
+            await loop.run_in_executor(None, self._synthesize_and_play, text)
 
         except Exception as e:
             logger.error(f"❌ TTS 오류 발생: {e}")
 
-    def _synthesize_and_play(self, text: str, voice_id: str) -> None:
+    def _synthesize_and_play(self, text: str) -> None:
         """
         텍스트를 음성으로 변환하고 재생하는 내부 메서드
 
         Args:
             text: 변환할 텍스트
-            voice_id: 사용할 음성 ID
         """
         try:
             # Polly로 음성 합성 (PCM 포맷으로 직접 출력)
             response = self.polly_client.synthesize_speech(
                 Text=text,
                 OutputFormat="pcm",  # PCM 포맷으로 변경
-                VoiceId=voice_id,
+                VoiceId=self.voice_id,
                 LanguageCode="ko-KR",  # 한국어
                 Engine="neural",  # 더 자연스러운 음성을 위해 neural 엔진 사용
                 SampleRate="16000",  # PCM용 샘플레이트
@@ -85,17 +86,14 @@ class PollyTTS:
         except Exception as e:
             logger.error(f"❌ 음성 합성 또는 재생 오류: {e}")
 
-    def speak_sync(self, text: str, voice_id: str = None) -> None:
+    def speak_sync(self, text: str) -> None:
         """
         동기적으로 텍스트를 음성으로 변환하고 재생
 
         Args:
             text: 변환할 텍스트
-            voice_id: 사용할 음성 ID
         """
-        if voice_id is None:
-            voice_id = config.voice_id
-        self._synthesize_and_play(text, voice_id)
+        self._synthesize_and_play(text)
 
     def get_available_voices(self) -> list:
         """

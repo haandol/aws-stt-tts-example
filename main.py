@@ -133,7 +133,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                     # TTS로 AI 응답을 음성으로 재생 (지혜 목소리 사용)
                     logger.info("🔊 음성 재생 시작...")
-                    await self.tts.speak_async(ai_response, voice_id=config.voice_id)
+                    await self.tts.speak_async(ai_response)
                     logger.info("✅ 음성 재생 완료")
 
                 finally:
@@ -241,8 +241,11 @@ if __name__ == "__main__":
         aws_profile_name=config.aws_profile,
     )
 
-    # TTS 초기화 (지혜 목소리 사용)
-    tts = PollyTTS(aws_profile_name=config.aws_profile)
+    # TTS 초기화
+    tts = PollyTTS(
+        voice_id=config.voice_id,
+        aws_profile=config.aws_profile,
+    )
 
     # 새 이벤트 루프 명시적으로 설정
     loop = asyncio.new_event_loop()
