@@ -1,4 +1,6 @@
 import asyncio
+import numpy as np
+import torch
 
 import dotenv
 
@@ -8,6 +10,7 @@ import sounddevice
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent, TranscriptResultStream
+from silero_vad import load_silero_vad
 from src.config import config
 from src.constant import SAMPLE_RATE, CHUNK_SIZE
 from src.llm import BedrockLLM
@@ -15,12 +18,59 @@ from src.logger import logger
 
 logger.info("🔍 환경 변수 로드 완료", config=config)
 
+# VAD 모델 전역 변수
+vad_model = None
+
+
+def initialize_vad():
+    """VAD 모델 초기화"""
+    global vad_model
+    if vad_model is None:
+        logger.info("🎯 Silero VAD 모델을 초기화합니다...")
+        vad_model = load_silero_vad()
+        torch.set_num_threads(1)
+        logger.info("✅ Silero VAD 모델이 초기화되었습니다.")
+    return vad_model
+
+
+def detect_voice_activity(audio_chunk, threshold=0.5):
+    """
+    오디오 청크에서 음성 활동을 감지합니다.
+
+    Args:
+        audio_chunk: 16-bit PCM 오디오 데이터
+        threshold: VAD 신뢰도 임계값 (0.0-1.0)
+
+    Returns:
+        bool: 음성이 감지되면 True, 그렇지 않으면 False
+    """
+    try:
+        # int16 PCM 데이터를 float32로 변환 (-1.0 ~ 1.0 범위)
+        audio_float = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+
+        # VAD 모델 입력을 위해 torch tensor로 변환
+        audio_tensor = torch.from_numpy(audio_float)
+
+        # VAD 신뢰도 계산
+        speech_prob = vad_model(audio_tensor, SAMPLE_RATE).item()
+
+        # 임계값을 넘으면 음성으로 간주
+        return speech_prob > threshold
+
+    except Exception as e:
+        logger.warning(f"⚠️ VAD 처리 중 오류 발생: {e}")
+        return True  # 오류 시 안전하게 음성으로 간주
+
 
 class MyEventHandler(TranscriptResultStreamHandler):
     def __init__(self, transcript_result_stream: TranscriptResultStream, llm: BedrockLLM):
         super().__init__(transcript_result_stream)
         self.llm = llm
         self.is_listening = False
+        self.voice_buffer = []  # 음성 버퍼
+        self.silence_counter = 0  # 무음 카운터
+        self.silence_threshold = 30  # 무음 임계값 (약 1초 = 30 * 32ms)
+        self.min_speech_chunks = 5  # 최소 음성 청크 수
         self.messages = [
             {
                 "role": "system",
@@ -64,18 +114,22 @@ class MyEventHandler(TranscriptResultStreamHandler):
                 logger.info(f"🤖 AI: {ai_response}")
 
 
-async def mic_stream(sample_rate, chunk_size):
-    # This function wraps the raw input stream from the microphone forwarding
-    # the blocks to an asyncio.Queue.
+async def mic_stream_with_vad(sample_rate, chunk_size):
+    """VAD가 적용된 마이크 스트림"""
     loop = asyncio.get_event_loop()
     input_queue = asyncio.Queue()
+
+    # VAD 모델 초기화
+    initialize_vad()
+
+    # 음성 상태 추적 변수
+    is_speaking = False
+    silence_counter = 0
+    silence_threshold = 30  # 약 1초간 무음이면 음성 종료로 간주 (30 * 32ms)
 
     def callback(indata, frame_count, time_info, status):
         loop.call_soon_threadsafe(input_queue.put_nowait, (bytes(indata), status))
 
-    # Be sure to use the correct parameters for the audio stream that matches
-    # the audio formats described for the source language you'll be using:
-    # https://docs.aws.amazon.com/transcribe/latest/dg/streaming.html
     stream = sounddevice.RawInputStream(
         channels=1,
         samplerate=sample_rate,
@@ -83,16 +137,36 @@ async def mic_stream(sample_rate, chunk_size):
         blocksize=chunk_size,
         dtype="int16",
     )
-    # Initiate the audio stream and asynchronously yield the audio chunks
-    # as they become available.
+
     with stream:
+        logger.info("🎯 VAD가 활성화된 마이크 스트리밍을 시작합니다.")
+
         while True:
             indata, status = await input_queue.get()
+
+            # VAD로 음성 활동 감지 (낮은 임계값으로 설정하여 더 민감하게)
+            has_voice = detect_voice_activity(indata, threshold=0.3)
+
+            if has_voice:
+                if not is_speaking:
+                    logger.info("🎤 음성 활동이 감지되었습니다.")
+                    is_speaking = True
+                silence_counter = 0
+            else:
+                if is_speaking:
+                    silence_counter += 1
+                    # 짧은 무음은 허용 (말하는 중간의 짧은 멈춤)
+                    if silence_counter >= silence_threshold:
+                        logger.info("🔇 음성 활동이 종료되었습니다.")
+                        is_speaking = False
+                        silence_counter = 0
+
+            # AWS Transcribe에는 항상 오디오를 전송 (타임아웃 방지)
             yield indata, status
 
 
 async def write_chunks(stream):
-    async for chunk, status in mic_stream(SAMPLE_RATE, CHUNK_SIZE):
+    async for chunk, status in mic_stream_with_vad(SAMPLE_RATE, CHUNK_SIZE):
         await stream.input_stream.send_audio_event(audio_chunk=chunk)
     await stream.input_stream.end_stream()
 
@@ -110,7 +184,7 @@ async def basic_transcribe(
         media_encoding="pcm",
     )
 
-    logger.info("🎙️ 마이크 스트리밍 채널이 열렸습니다. 말씀해 주세요.")
+    logger.info("🎙️ VAD 기반 마이크 스트리밍 채널이 열렸습니다. 말씀해 주세요.")
 
     # Instantiate our handler and start processing events
     handler = MyEventHandler(stream.output_stream, llm)
@@ -118,11 +192,13 @@ async def basic_transcribe(
 
 
 if __name__ == "__main__":
-    # TODO: VAD 추가
+    # VAD 초기화
+    initialize_vad()
+    logger.info("✅ Silero VAD가 활성화되었습니다.")
 
     # LLM 초기화
     llm = BedrockLLM(
-        model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        model_id=config.model_id,
         aws_profile_name=config.aws_profile,
     )
 

@@ -51,10 +51,13 @@ dependencies = [
     { name = "boto3" },
     { name = "langchain" },
     { name = "langchain-aws" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "python-dotenv" },
     { name = "silero-vad" },
     { name = "sounddevice" },
     { name = "structlog" },
+    { name = "torch" },
 ]
 
 [package.metadata]
@@ -63,10 +66,12 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.38.35" },
     { name = "langchain", specifier = ">=0.3.25" },
     { name = "langchain-aws", specifier = ">=0.2.25" },
+    { name = "numpy", specifier = ">=1.24.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "silero-vad", specifier = ">=5.1.2" },
     { name = "sounddevice", specifier = ">=0.5.2" },
     { name = "structlog", specifier = ">=25.4.0" },
+    { name = "torch", specifier = ">=2.0.0" },
 ]
 
 [[package]]

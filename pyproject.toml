@@ -9,10 +9,12 @@ dependencies = [
     "boto3>=1.38.35",
     "langchain>=0.3.25",
     "langchain-aws>=0.2.25",
+    "numpy>=1.24.0",
     "python-dotenv>=1.1.0",
     "silero-vad>=5.1.2",
     "sounddevice>=0.5.2",
     "structlog>=25.4.0",
+    "torch>=2.0.0",
 ]
 
 [tool.ruff]
