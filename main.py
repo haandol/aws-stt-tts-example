@@ -10,6 +10,7 @@ import sounddevice
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent, TranscriptResultStream
+
 from silero_vad import load_silero_vad
 from src.config import config
 from src.constant import SAMPLE_RATE, CHUNK_SIZE
@@ -21,6 +22,9 @@ logger.info("🔍 환경 변수 로드 완료", config=config)
 
 # VAD 모델 전역 변수
 vad_model = None
+
+# 음성 입력 상태 관리
+is_processing_response = False  # LLM 처리 및 TTS 재생 중인지 여부
 
 
 def initialize_vad():
@@ -81,6 +85,12 @@ class MyEventHandler(TranscriptResultStreamHandler):
         ]
 
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
+        global is_processing_response
+
+        # 응답 처리 중이면 음성 인식 무시
+        if is_processing_response:
+            return
+
         results = transcript_event.transcript.results
 
         # 음성 인식 시작 감지
@@ -103,24 +113,39 @@ class MyEventHandler(TranscriptResultStreamHandler):
                 user_input = result.alternatives[0].transcript
                 logger.info(f"🔇 음성 인식 결과: {user_input}")
 
-                # 사용자 메시지 추가
-                self.messages.append({"role": "user", "content": user_input})
+                # 응답 처리 시작 - 다음 음성 입력 차단
+                is_processing_response = True
+                logger.info("⏸️ 음성 입력을 일시 정지합니다.")
 
-                # LLM에 전체 대화 기록 전달
-                response = await self.llm.model.ainvoke(self.messages)
+                try:
+                    # 사용자 메시지 추가
+                    self.messages.append({"role": "user", "content": user_input})
 
-                # AI 응답 추가
-                ai_response = response.content
-                self.messages.append({"role": "assistant", "content": ai_response})
+                    # LLM에 전체 대화 기록 전달
+                    logger.info("🤖 LLM 처리 중...")
+                    response = await self.llm.model.ainvoke(self.messages)
 
-                logger.info(f"🤖 AI: {ai_response}")
+                    # AI 응답 추가
+                    ai_response = response.content
+                    self.messages.append({"role": "assistant", "content": ai_response})
 
-                # TTS로 AI 응답을 음성으로 재생 (지혜 목소리 사용)
-                await self.tts.speak_async(ai_response, voice_id=config.voice_id)
+                    logger.info(f"🤖 AI: {ai_response}")
+
+                    # TTS로 AI 응답을 음성으로 재생 (지혜 목소리 사용)
+                    logger.info("🔊 음성 재생 시작...")
+                    await self.tts.speak_async(ai_response, voice_id=config.voice_id)
+                    logger.info("✅ 음성 재생 완료")
+
+                finally:
+                    # 응답 처리 완료 - 음성 입력 재개
+                    is_processing_response = False
+                    logger.info("▶️ 음성 입력을 재개합니다. 다시 말씀해 주세요.")
 
 
 async def mic_stream_with_vad(sample_rate, chunk_size):
     """VAD가 적용된 마이크 스트림"""
+    global is_processing_response
+
     loop = asyncio.get_event_loop()
     input_queue = asyncio.Queue()
 
@@ -149,6 +174,13 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
         while True:
             indata, status = await input_queue.get()
 
+            # 응답 처리 중이면 음성 데이터 전송하지 않음 (단, 무음 데이터는 전송하여 연결 유지)
+            if is_processing_response:
+                # 무음 데이터로 연결 유지
+                silence_data = bytes(len(indata))  # 무음 데이터 생성
+                yield silence_data, status
+                continue
+
             # VAD로 음성 활동 감지 (낮은 임계값으로 설정하여 더 민감하게)
             has_voice = detect_voice_activity(indata, threshold=0.3)
 
@@ -166,7 +198,7 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
                         is_speaking = False
                         silence_counter = 0
 
-            # AWS Transcribe에는 항상 오디오를 전송 (타임아웃 방지)
+            # 실제 음성 데이터 전송
             yield indata, status
 
 
@@ -190,7 +222,8 @@ async def basic_transcribe(
         media_encoding="pcm",
     )
 
-    logger.info("🎙️ VAD 기반 마이크 스트리밍 채널이 열렸습니다. 말씀해 주세요.")
+    logger.info("🎙️ VAD 기반 마이크 스트리밍 채널이 열렸습니다.")
+    logger.info("✨ 준비 완료! 음성으로 질문해 주세요. (AI 응답 중에는 다음 입력이 대기됩니다)")
 
     # Instantiate our handler and start processing events
     handler = MyEventHandler(stream.output_stream, llm, tts)
