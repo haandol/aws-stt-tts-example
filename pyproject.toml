@@ -1,0 +1,23 @@
+[project]
+name = "aws-stt-tts-example"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "amazon-transcribe>=0.6.4",
+    "boto3>=1.38.35",
+    "langchain>=0.3.25",
+    "langchain-aws>=0.2.25",
+    "python-dotenv>=1.1.0",
+    "silero-vad>=5.1.2",
+    "sounddevice>=0.5.2",
+    "structlog>=25.4.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = ["E402"]
