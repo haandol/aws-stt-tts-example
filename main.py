@@ -1,16 +1,18 @@
+import signal
+import sys
 import asyncio
-import numpy as np
-import torch
 
 import dotenv
 
 dotenv.load_dotenv()  # noqa: E402
 
+import torch
 import sounddevice
+import numpy as np
+from silero_vad import load_silero_vad
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent, TranscriptResultStream
-from silero_vad import load_silero_vad
 
 from src.config import config
 from src.constant import SAMPLE_RATE, CHUNK_SIZE
@@ -25,6 +27,28 @@ vad_model = None
 
 # 음성 입력 상태 관리
 is_processing_response = False  # LLM 처리 및 TTS 재생 중인지 여부
+
+# 전역 TTS 인스턴스 (종료 신호 처리용)
+tts_instance = None
+
+# 애플리케이션 종료 플래그
+shutdown_event = asyncio.Event()
+
+
+def signal_handler(signum, frame):
+    """시그널 핸들러 - Graceful shutdown"""
+    logger.info(f"🛑 종료 신호 수신 (시그널: {signum})")
+    shutdown_event.set()
+
+    # 전역 TTS 인스턴스가 있다면 즉시 재생 중지
+    global tts_instance
+    if 'tts_instance' in globals() and tts_instance is not None:
+        tts_instance.stop_playback()
+
+
+# 시그널 핸들러 등록
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 
 def initialize_vad():
@@ -51,7 +75,8 @@ def detect_voice_activity(audio_chunk, threshold=0.5):
     """
     try:
         # int16 PCM 데이터를 float32로 변환 (-1.0 ~ 1.0 범위)
-        audio_float = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+        audio_float = np.frombuffer(
+            audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
 
         # VAD 모델 입력을 위해 torch tensor로 변환
         audio_tensor = torch.from_numpy(audio_float)
@@ -119,7 +144,8 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                 try:
                     # 사용자 메시지 추가
-                    self.messages.append({"role": "user", "content": user_input})
+                    self.messages.append(
+                        {"role": "user", "content": user_input})
 
                     # LLM에 전체 대화 기록 전달
                     logger.info("🤖 LLM 처리 중...")
@@ -127,7 +153,8 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                     # AI 응답 추가
                     ai_response = response.content
-                    self.messages.append({"role": "assistant", "content": ai_response})
+                    self.messages.append(
+                        {"role": "assistant", "content": ai_response})
 
                     logger.info(f"🤖 AI: {ai_response}")
 
@@ -158,7 +185,9 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
     silence_threshold = 30  # 약 1초간 무음이면 음성 종료로 간주 (30 * 32ms)
 
     def callback(indata, frame_count, time_info, status):
-        loop.call_soon_threadsafe(input_queue.put_nowait, (bytes(indata), status))
+        if not shutdown_event.is_set():
+            loop.call_soon_threadsafe(
+                input_queue.put_nowait, (bytes(indata), status))
 
     stream = sounddevice.RawInputStream(
         channels=1,
@@ -168,44 +197,73 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
         dtype="int16",
     )
 
-    with stream:
-        logger.info("🎯 VAD가 활성화된 마이크 스트리밍을 시작합니다.")
+    try:
+        with stream:
+            logger.info("🎯 VAD가 활성화된 마이크 스트리밍을 시작합니다.")
 
-        while True:
-            indata, status = await input_queue.get()
+            while not shutdown_event.is_set():
+                try:
+                    # 타임아웃으로 종료 조건 체크
+                    indata, status = await asyncio.wait_for(input_queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
 
-            # 응답 처리 중이면 음성 데이터 전송하지 않음 (단, 무음 데이터는 전송하여 연결 유지)
-            if is_processing_response:
-                # 무음 데이터로 연결 유지
-                silence_data = bytes(len(indata))  # 무음 데이터 생성
-                yield silence_data, status
-                continue
+                # 응답 처리 중이면 음성 데이터 전송하지 않음 (단, 무음 데이터는 전송하여 연결 유지)
+                if is_processing_response:
+                    # 무음 데이터로 연결 유지
+                    silence_data = bytes(len(indata))  # 무음 데이터 생성
+                    yield silence_data, status
+                    continue
 
-            # VAD로 음성 활동 감지 (낮은 임계값으로 설정하여 더 민감하게)
-            has_voice = detect_voice_activity(indata, threshold=0.3)
+                # VAD로 음성 활동 감지 (낮은 임계값으로 설정하여 더 민감하게)
+                has_voice = detect_voice_activity(indata, threshold=0.3)
 
-            if has_voice:
-                if not is_speaking:
-                    logger.info("🎤 음성 활동이 감지되었습니다.")
-                    is_speaking = True
-                silence_counter = 0
-            else:
-                if is_speaking:
-                    silence_counter += 1
-                    # 짧은 무음은 허용 (말하는 중간의 짧은 멈춤)
-                    if silence_counter >= silence_threshold:
-                        logger.info("🔇 음성 활동이 종료되었습니다.")
-                        is_speaking = False
-                        silence_counter = 0
+                if has_voice:
+                    if not is_speaking:
+                        logger.info("🎤 음성 활동이 감지되었습니다.")
+                        is_speaking = True
+                    silence_counter = 0
+                else:
+                    if is_speaking:
+                        silence_counter += 1
+                        # 짧은 무음은 허용 (말하는 중간의 짧은 멈춤)
+                        if silence_counter >= silence_threshold:
+                            logger.info("🔇 음성 활동이 종료되었습니다.")
+                            is_speaking = False
+                            silence_counter = 0
 
-            # 실제 음성 데이터 전송
-            yield indata, status
+                # 실제 음성 데이터 전송
+                yield indata, status
+
+    except Exception as e:
+        logger.error(f"❌ 마이크 스트림 오류: {e}")
+    finally:
+        logger.info("🔇 마이크 스트림을 정리합니다.")
 
 
 async def write_chunks(stream):
-    async for chunk, status in mic_stream_with_vad(SAMPLE_RATE, CHUNK_SIZE):
-        await stream.input_stream.send_audio_event(audio_chunk=chunk)
-    await stream.input_stream.end_stream()
+    stream_ended = False
+    try:
+        async for chunk, status in mic_stream_with_vad(SAMPLE_RATE, CHUNK_SIZE):
+            if shutdown_event.is_set():
+                break
+            await stream.input_stream.send_audio_event(audio_chunk=chunk)
+    except Exception as e:
+        logger.error(f"❌ 청크 전송 오류: {e}")
+    finally:
+        if not stream_ended:
+            try:
+                await stream.input_stream.end_stream()
+                stream_ended = True
+                logger.info("✅ 입력 스트림이 정상적으로 종료되었습니다.")
+            except Exception as e:
+                if "completed" not in str(e).lower():
+                    logger.warning(f"⚠️ 스트림 종료 중 오류: {e}")
+                else:
+                    logger.info("ℹ️ 스트림이 이미 종료되었습니다.")
+                stream_ended = True
+
+    return stream_ended
 
 
 async def basic_transcribe(
@@ -214,51 +272,178 @@ async def basic_transcribe(
     sample_rate: int,
     lang_code: str,
 ):
-    client = TranscribeStreamingClient(region=config.aws_default_region)
+    client = None
+    stream = None
 
-    stream = await client.start_stream_transcription(
-        language_code=lang_code,
-        media_sample_rate_hz=sample_rate,
-        media_encoding="pcm",
-    )
+    try:
+        client = TranscribeStreamingClient(region=config.aws_default_region)
 
-    logger.info("🎙️ VAD 기반 마이크 스트리밍 채널이 열렸습니다.")
-    logger.info("✨ 준비 완료! 음성으로 질문해 주세요. (AI 응답 중에는 다음 입력이 대기됩니다)")
+        stream = await client.start_stream_transcription(
+            language_code=lang_code,
+            media_sample_rate_hz=sample_rate,
+            media_encoding="pcm",
+        )
 
-    # Instantiate our handler and start processing events
-    handler = MyEventHandler(stream.output_stream, llm, tts)
-    await asyncio.gather(write_chunks(stream), handler.handle_events())
+        logger.info("🎙️ VAD 기반 마이크 스트리밍 채널이 열렸습니다.")
+        logger.info("✨ 준비 완료! 음성으로 질문해 주세요. (AI 응답 중에는 다음 입력이 대기됩니다)")
+        logger.info("💡 종료하려면 Ctrl+C를 누르세요.")
+
+        # Instantiate our handler and start processing events
+        handler = MyEventHandler(stream.output_stream, llm, tts)
+
+                # 태스크들을 병렬로 실행하되 하나라도 완료되거나 종료 신호가 오면 정리
+        write_task = asyncio.create_task(write_chunks(stream))
+        handler_task = asyncio.create_task(handler.handle_events())
+        shutdown_task = asyncio.create_task(wait_for_shutdown())
+
+        tasks = [write_task, handler_task, shutdown_task]
+
+        stream_ended = False
+        try:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            # write_chunks가 완료되었다면 스트림 종료 상태 확인
+            if write_task in done:
+                try:
+                    stream_ended = await write_task
+                except Exception:
+                    stream_ended = False
+
+            # 완료되지 않은 태스크들 취소
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        except Exception as e:
+            logger.error(f"❌ 태스크 실행 중 오류: {e}")
+
+    except Exception as e:
+        logger.error(f"❌ 전사 서비스 초기화 오류: {e}")
+    finally:
+        logger.info("🧹 리소스를 정리합니다...")
+
+        # 스트림 정리 (아직 종료되지 않은 경우에만)
+        if stream and not stream_ended:
+            try:
+                await stream.input_stream.end_stream()
+                logger.info("✅ 입력 스트림 정리 완료")
+            except Exception as e:
+                if "completed" not in str(e).lower():
+                    logger.warning(f"⚠️ 입력 스트림 정리 중 오류: {e}")
+                else:
+                    logger.info("ℹ️ 스트림이 이미 정리되었습니다.")
+
+        # 클라이언트는 자동으로 정리되므로 명시적 close 불필요
+        if client:
+            logger.info("✅ 클라이언트 정리 완료")
+
+
+async def wait_for_shutdown():
+    """종료 신호를 대기하는 코루틴"""
+    await shutdown_event.wait()
+    logger.info("🛑 종료 신호를 받았습니다. 애플리케이션을 종료합니다...")
+
+
+def cleanup_resources(tts=None):
+    """리소스 정리 함수"""
+    logger.info("🧹 최종 리소스 정리를 시작합니다...")
+
+    try:
+        # TTS 리소스 정리
+        if tts is not None:
+            tts.cleanup()
+    except Exception as e:
+        logger.warning(f"⚠️ TTS 정리 중 오류: {e}")
+
+    try:
+        # sounddevice 정리
+        sounddevice.stop()
+        logger.info("✅ sounddevice 정리 완료")
+    except Exception as e:
+        logger.warning(f"⚠️ sounddevice 정리 중 오류: {e}")
+
+    try:
+        # torch 스레드 정리
+        if vad_model is not None:
+            torch.set_num_threads(1)
+        logger.info("✅ torch 리소스 정리 완료")
+    except Exception as e:
+        logger.warning(f"⚠️ torch 정리 중 오류: {e}")
+
+    logger.info("✅ 최종 리소스 정리 완료")
 
 
 if __name__ == "__main__":
-    # VAD 초기화
-    initialize_vad()
-    logger.info("✅ Silero VAD가 활성화되었습니다.")
-
-    # LLM 초기화
-    llm = BedrockLLM(
-        model_id=config.model_id,
-        aws_profile_name=config.aws_profile,
-    )
-
-    # TTS 초기화
-    tts = PollyTTS(
-        voice_id=config.voice_id,
-        aws_profile=config.aws_profile,
-    )
-
-    # 새 이벤트 루프 명시적으로 설정
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
+    tts = None
     try:
-        loop.run_until_complete(
-            basic_transcribe(
-                llm=llm,
-                tts=tts,
-                sample_rate=SAMPLE_RATE,
-                lang_code=config.lang_code,
-            )
+        # VAD 초기화
+        initialize_vad()
+        logger.info("✅ Silero VAD가 활성화되었습니다.")
+
+        # LLM 초기화
+        llm = BedrockLLM(
+            model_id=config.model_id,
+            aws_profile_name=config.aws_profile,
         )
+
+        # TTS 초기화
+        tts = PollyTTS(
+            voice_id=config.voice_id,
+            aws_profile=config.aws_profile,
+        )
+
+        # 전역 TTS 인스턴스 설정 (종료 신호 처리용)
+        tts_instance = tts
+
+        # 새 이벤트 루프 명시적으로 설정
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            loop.run_until_complete(
+                basic_transcribe(
+                    llm=llm,
+                    tts=tts,
+                    sample_rate=SAMPLE_RATE,
+                    lang_code=config.lang_code,
+                )
+            )
+        except KeyboardInterrupt:
+            logger.info("🛑 사용자에 의해 중단되었습니다.")
+        except Exception as e:
+            logger.error(f"❌ 실행 중 오류 발생: {e}")
+        finally:
+            logger.info("🏁 이벤트 루프를 정리합니다...")
+
+            # 남은 태스크들을 정리
+            pending_tasks = asyncio.all_tasks(loop)
+            if pending_tasks:
+                logger.info(f"⚠️ {len(pending_tasks)}개의 미완료 태스크를 취소합니다...")
+                for task in pending_tasks:
+                    task.cancel()
+
+                # 모든 태스크가 정리될 때까지 대기
+                try:
+                    loop.run_until_complete(
+                        asyncio.gather(*pending_tasks, return_exceptions=True)
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 태스크 정리 중 오류: {e}")
+
+            # 이벤트 루프 정리
+            try:
+                loop.close()
+                logger.info("✅ 이벤트 루프가 정리되었습니다.")
+            except Exception as e:
+                logger.warning(f"⚠️ 이벤트 루프 정리 중 오류: {e}")
+
+    except Exception as e:
+        logger.error(f"❌ 애플리케이션 초기화 오류: {e}")
     finally:
-        loop.close()
+        # 최종 리소스 정리
+        cleanup_resources(tts)
+        logger.info("👋 애플리케이션이 완전히 종료되었습니다.")
+        sys.exit(0)
