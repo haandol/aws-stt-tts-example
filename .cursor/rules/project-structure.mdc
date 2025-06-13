@@ -1,0 +1,68 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# AWS STT-TTS Example Project Structure
+
+This project is a voice assistant application that uses AWS services for speech-to-text and text-to-speech functionality.
+
+## Core Components
+
+### Main Application
+- [main.py](mdc:main.py): The main entry point of the application that handles:
+  - Voice Activity Detection (VAD) using Silero
+  - Wake word detection using Porcupine
+  - AWS Transcribe streaming for speech-to-text
+  - Integration with AWS Bedrock for LLM responses
+  - Text-to-speech using AWS Polly
+
+### Source Code Structure
+- [src/config.py](mdc:src/config.py): Configuration management
+- [src/constant.py](mdc:src/constant.py): Application constants
+- [src/llm.py](mdc:src/llm.py): AWS Bedrock LLM integration
+- [src/tts.py](mdc:src/tts.py): AWS Polly TTS implementation
+- [src/logger.py](mdc:src/logger.py): Logging configuration
+
+## Project Configuration
+- [pyproject.toml](mdc:pyproject.toml): Python project dependencies and metadata
+- [.env](mdc:.env): Environment variables (not tracked in git)
+- [.python-version](mdc:.python-version): Python version specification
+
+## Development Environment
+- [.devcontainer/](mdc:.devcontainer): Development container configuration
+- [.venv/](mdc:.venv): Python virtual environment
+- [env/](mdc:env): Additional environment files
+
+## Key Features
+1. Voice Activity Detection (VAD)
+   - Uses Silero VAD model for detecting speech
+   - Configurable threshold for speech detection
+
+2. Wake Word Detection
+   - Uses Porcupine for wake word detection
+   - Configurable wake word through environment variables
+
+3. Speech-to-Text
+   - Real-time streaming transcription using AWS Transcribe
+   - Supports multiple languages
+
+4. LLM Integration
+   - Uses AWS Bedrock for language model responses
+   - Asynchronous processing of responses
+
+5. Text-to-Speech
+   - Uses AWS Polly for high-quality speech synthesis
+   - Supports multiple voices and languages
+
+## Usage
+1. Set up environment variables in `.env`
+2. Install dependencies using `uv` or `pip`
+3. Run the application using `python main.py`
+4. Use the configured wake word to activate the assistant
+5. Speak naturally and receive responses through TTS
+
+## Error Handling
+- Graceful shutdown handling for SIGINT and SIGTERM
+- Comprehensive error logging
+- Resource cleanup on exit

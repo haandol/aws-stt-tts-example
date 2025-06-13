@@ -1,0 +1,83 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Code Structure and Organization
+
+## Project Layout
+```
+.
+├── main.py              # Main application entry point
+├── src/                 # Source code directory
+│   ├── config.py       # Configuration management
+│   ├── constant.py     # Constants and configuration values
+│   ├── llm.py         # LLM integration with AWS Bedrock
+│   ├── tts.py         # Text-to-speech using AWS Polly
+│   └── logger.py      # Logging configuration
+└── .env               # Environment variables (not tracked in git)
+```
+
+## Code Organization
+
+### Main Application (main.py)
+- Entry point and orchestration
+- Signal handling and graceful shutdown
+- Resource initialization and cleanup
+- Main event loop management
+
+### Core Components
+1. Voice Activity Detection (VAD)
+   - `initialize_vad()`: Initializes Silero VAD model
+   - `detect_voice_activity()`: Processes audio chunks for voice detection
+
+2. Wake Word Detection
+   - `initialize_porcupine()`: Sets up Porcupine wake word detector
+   - `detect_wake_word()`: Processes audio for wake word detection
+
+3. Audio Processing
+   - `mic_stream_with_vad()`: Manages microphone input with VAD
+   - `write_chunks()`: Handles audio chunk streaming to AWS Transcribe
+
+4. Transcription Handler
+   - `MyEventHandler`: Manages transcription events
+   - Handles conversation flow and LLM integration
+   - Manages TTS response generation
+
+### Asynchronous Operations
+- Uses asyncio for concurrent operations
+- Manages multiple async tasks:
+  - Audio streaming
+  - Transcription handling
+  - Shutdown monitoring
+
+### Error Handling
+- Comprehensive try-except blocks
+- Graceful resource cleanup
+- Detailed error logging
+
+### State Management
+- Global state for processing flags
+- Conversation history management
+- Resource instance tracking
+
+## Best Practices
+1. Resource Management
+   - Proper initialization and cleanup
+   - Context managers for resource handling
+   - Graceful shutdown procedures
+
+2. Error Handling
+   - Comprehensive error catching
+   - Detailed error logging
+   - Graceful degradation
+
+3. Code Organization
+   - Clear separation of concerns
+   - Modular component design
+   - Consistent error handling patterns
+
+4. Performance
+   - Efficient resource usage
+   - Proper async/await patterns
+   - Background task management

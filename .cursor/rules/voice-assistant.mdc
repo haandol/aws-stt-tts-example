@@ -1,0 +1,63 @@
+---
+description: voice assistant feature
+globs: 
+alwaysApply: false
+---
+# Voice Assistant Codebase Guide
+
+## Overview
+This is a voice assistant application that uses AWS services for speech-to-text and text-to-speech functionality. The application listens for a wake word, processes voice input, and responds using AI.
+
+## Main Components
+
+### Core Files
+- [main.py](mdc:main.py) - The main entry point that orchestrates the voice assistant functionality
+
+### Key Features
+1. Wake Word Detection
+   - Uses Porcupine for wake word detection
+   - Configurable wake word through environment variables
+
+2. Voice Activity Detection (VAD)
+   - Uses Silero VAD model to detect when user is speaking
+   - Helps in determining when to start/stop voice recording
+
+3. Speech-to-Text
+   - Uses AWS Transcribe for real-time speech recognition
+   - Supports multiple languages through configuration
+
+4. Text-to-Speech
+   - Uses AWS Polly for natural-sounding voice responses
+   - Configurable voice ID through environment variables
+
+5. AI Integration
+   - Uses AWS Bedrock for LLM responses
+   - Maintains conversation history for context
+
+## Configuration
+The application uses environment variables for configuration, loaded through dotenv. Key configurations include:
+- AWS credentials and region
+- Wake word settings
+- Voice ID for TTS
+- Language code for STT
+- Model ID for LLM
+
+## Usage Flow
+1. Application starts and initializes all components
+2. Listens for wake word
+3. When wake word is detected, starts listening for voice input
+4. Processes voice input through AWS Transcribe
+5. Sends transcribed text to LLM
+6. Converts LLM response to speech using Polly
+7. Returns to listening state
+
+## Error Handling
+- Graceful shutdown handling for SIGINT and SIGTERM
+- Resource cleanup on exit
+- Error logging throughout the application
+
+## Development Notes
+- Uses asyncio for concurrent operations
+- Implements proper resource cleanup
+- Includes comprehensive logging
+- Handles background tasks and cancellation properly
