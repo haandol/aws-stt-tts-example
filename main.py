@@ -8,6 +8,7 @@ dotenv.load_dotenv()  # noqa: E402
 
 import torch
 import sounddevice
+import pvporcupine
 import numpy as np
 from silero_vad import load_silero_vad
 from amazon_transcribe.client import TranscribeStreamingClient
@@ -25,8 +26,12 @@ logger.info("🔍 환경 변수 로드 완료", config=config)
 # VAD 모델 전역 변수
 vad_model = None
 
+# Porcupine wake word detector 전역 변수
+porcupine = None
+
 # 음성 입력 상태 관리
 is_processing_response = False  # LLM 처리 및 TTS 재생 중인지 여부
+is_wake_word_detected = False  # 웨이크워드 감지 여부
 
 # 전역 TTS 인스턴스 (종료 신호 처리용)
 tts_instance = None
@@ -92,6 +97,168 @@ def detect_voice_activity(audio_chunk, threshold=0.5):
         return True  # 오류 시 안전하게 음성으로 간주
 
 
+def initialize_porcupine():
+    """Porcupine 웨이크워드 감지기 초기화"""
+    global porcupine
+    if porcupine is None:
+        logger.info("🎯 Porcupine 웨이크워드 감지기를 초기화합니다...")
+        try:
+            porcupine = pvporcupine.create(
+                access_key=config.porcupine_access_key,
+                keywords=[config.wake_word]
+            )
+            logger.info("✅ Porcupine 웨이크워드 감지기가 초기화되었습니다.")
+        except Exception as e:
+            logger.error(f"❌ Porcupine 초기화 실패: {e}")
+            raise
+    return porcupine
+
+
+def detect_wake_word(audio_chunk):
+    """
+    오디오 청크에서 웨이크워드를 감지합니다.
+
+    Args:
+        audio_chunk: 16-bit PCM 오디오 데이터
+
+    Returns:
+        bool: 웨이크워드가 감지되면 True, 그렇지 않으면 False
+    """
+    try:
+        # int16 PCM 데이터를 int16 배열로 변환
+        audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
+
+        # Porcupine으로 웨이크워드 감지
+        keyword_index = porcupine.process(audio_data)
+
+        return keyword_index >= 0
+    except Exception as e:
+        logger.warning(f"⚠️ 웨이크워드 감지 중 오류 발생: {e}")
+        return False
+
+
+async def mic_stream_with_vad(sample_rate, chunk_size):
+    """VAD가 적용된 마이크 스트림"""
+    global is_processing_response, is_wake_word_detected
+
+    loop = asyncio.get_event_loop()
+    input_queue = asyncio.Queue()
+
+    # VAD 모델 초기화
+    initialize_vad()
+
+    # Porcupine 초기화
+    initialize_porcupine()
+
+    # 음성 상태 추적 변수
+    is_speaking = False
+    silence_counter = 0
+    silence_threshold = 30  # 약 1초간 무음이면 음성 종료로 간주 (30 * 32ms)
+    wake_word_cooldown = 0  # 웨이크워드 감지 후 일정 시간 동안 재감지 방지
+
+    def callback(indata, frame_count, time_info, status):
+        if not shutdown_event.is_set():
+            loop.call_soon_threadsafe(
+                input_queue.put_nowait, (bytes(indata), status))
+
+    stream = sounddevice.RawInputStream(
+        channels=1,
+        samplerate=sample_rate,
+        callback=callback,
+        blocksize=chunk_size,
+        dtype="int16",
+    )
+
+    try:
+        with stream:
+            logger.info("🎯 VAD가 활성화된 마이크 스트리밍을 시작합니다.")
+
+            while not shutdown_event.is_set():
+                try:
+                    # 타임아웃으로 종료 조건 체크
+                    indata, status = await asyncio.wait_for(input_queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+
+                # 응답 처리 중이면 음성 데이터 전송하지 않음
+                if is_processing_response:
+                    # 무음 데이터로 연결 유지
+                    silence_data = bytes(len(indata))
+                    yield silence_data, status
+                    continue
+
+                # 웨이크워드 감지
+                if not is_wake_word_detected:
+                    if wake_word_cooldown > 0:
+                        wake_word_cooldown -= 1
+                        yield bytes(len(indata)), status
+                        continue
+
+                    if detect_wake_word(indata):
+                        logger.info("🔔 웨이크워드가 감지되었습니다!")
+                        is_wake_word_detected = True
+                        is_speaking = True  # 웨이크워드 감지 시 바로 음성 활동 시작
+                        wake_word_cooldown = 30  # 약 1초 동안 웨이크워드 재감지 방지
+                        yield indata, status  # 웨이크워드 감지 직후의 음성 데이터도 전송
+                        continue
+                    else:
+                        # 웨이크워드가 감지되지 않았으면 무음 데이터 전송
+                        yield bytes(len(indata)), status
+                        continue
+
+                # VAD로 음성 활동 감지
+                has_voice = detect_voice_activity(indata, threshold=0.3)
+
+                if has_voice:
+                    if not is_speaking:
+                        logger.info("🎤 음성 활동이 감지되었습니다.")
+                        is_speaking = True
+                    silence_counter = 0
+                else:
+                    if is_speaking:
+                        silence_counter += 1
+                        if silence_counter >= silence_threshold:
+                            logger.info("🔇 음성 활동이 종료되었습니다.")
+                            is_speaking = False
+                            silence_counter = 0
+                            is_wake_word_detected = False  # 음성 종료 시 웨이크워드 상태 초기화
+
+                # 실제 음성 데이터 전송
+                yield indata, status
+
+    except Exception as e:
+        logger.error(f"❌ 마이크 스트림 오류: {e}")
+    finally:
+        logger.info("🔇 마이크 스트림을 정리합니다.")
+        if porcupine is not None:
+            porcupine.delete()
+
+
+async def write_chunks(stream):
+    stream_ended = False
+    try:
+        async for chunk, status in mic_stream_with_vad(SAMPLE_RATE, CHUNK_SIZE):
+            if shutdown_event.is_set():
+                break
+            await stream.input_stream.send_audio_event(audio_chunk=chunk)
+    except Exception as e:
+        logger.error(f"❌ 청크 전송 오류: {e}")
+    finally:
+        if not stream_ended:
+            try:
+                await stream.input_stream.end_stream()
+                stream_ended = True
+                logger.info("✅ 입력 스트림이 정상적으로 종료되었습니다.")
+            except Exception as e:
+                if "completed" not in str(e).lower():
+                    logger.warning(f"⚠️ 스트림 종료 중 오류: {e}")
+                else:
+                    logger.info("ℹ️ 스트림이 이미 종료되었습니다.")
+                stream_ended = True
+
+    return stream_ended
+
+
 class MyEventHandler(TranscriptResultStreamHandler):
     def __init__(self, transcript_result_stream: TranscriptResultStream, llm: BedrockLLM, tts: PollyTTS):
         super().__init__(transcript_result_stream)
@@ -110,10 +277,14 @@ class MyEventHandler(TranscriptResultStreamHandler):
         ]
 
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
-        global is_processing_response
+        global is_processing_response, is_wake_word_detected
 
         # 응답 처리 중이면 음성 인식 무시
         if is_processing_response:
+            return
+
+        # 웨이크워드가 감지되지 않았으면 음성 인식 무시
+        if not is_wake_word_detected:
             return
 
         results = transcript_event.transcript.results
@@ -127,6 +298,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
         if not results and self.is_listening:
             logger.info("🔇 음성 인식이 종료되었습니다.")
             self.is_listening = False
+            is_wake_word_detected = False  # 음성 인식 종료 시 웨이크워드 상태 초기화
             return
 
         for result in results:
@@ -158,7 +330,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                     logger.info(f"🤖 AI: {ai_response}")
 
-                    # TTS로 AI 응답을 음성으로 재생 (지혜 목소리 사용)
+                    # TTS로 AI 응답을 음성으로 재생
                     logger.info("🔊 음성 재생 시작...")
                     await self.tts.speak_async(ai_response)
                     logger.info("✅ 음성 재생 완료")
@@ -166,104 +338,8 @@ class MyEventHandler(TranscriptResultStreamHandler):
                 finally:
                     # 응답 처리 완료 - 음성 입력 재개
                     is_processing_response = False
-                    logger.info("▶️ 음성 입력을 재개합니다. 다시 말씀해 주세요.")
-
-
-async def mic_stream_with_vad(sample_rate, chunk_size):
-    """VAD가 적용된 마이크 스트림"""
-    global is_processing_response
-
-    loop = asyncio.get_event_loop()
-    input_queue = asyncio.Queue()
-
-    # VAD 모델 초기화
-    initialize_vad()
-
-    # 음성 상태 추적 변수
-    is_speaking = False
-    silence_counter = 0
-    silence_threshold = 30  # 약 1초간 무음이면 음성 종료로 간주 (30 * 32ms)
-
-    def callback(indata, frame_count, time_info, status):
-        if not shutdown_event.is_set():
-            loop.call_soon_threadsafe(
-                input_queue.put_nowait, (bytes(indata), status))
-
-    stream = sounddevice.RawInputStream(
-        channels=1,
-        samplerate=sample_rate,
-        callback=callback,
-        blocksize=chunk_size,
-        dtype="int16",
-    )
-
-    try:
-        with stream:
-            logger.info("🎯 VAD가 활성화된 마이크 스트리밍을 시작합니다.")
-
-            while not shutdown_event.is_set():
-                try:
-                    # 타임아웃으로 종료 조건 체크
-                    indata, status = await asyncio.wait_for(input_queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    continue
-
-                # 응답 처리 중이면 음성 데이터 전송하지 않음 (단, 무음 데이터는 전송하여 연결 유지)
-                if is_processing_response:
-                    # 무음 데이터로 연결 유지
-                    silence_data = bytes(len(indata))  # 무음 데이터 생성
-                    yield silence_data, status
-                    continue
-
-                # VAD로 음성 활동 감지 (낮은 임계값으로 설정하여 더 민감하게)
-                has_voice = detect_voice_activity(indata, threshold=0.3)
-
-                if has_voice:
-                    if not is_speaking:
-                        logger.info("🎤 음성 활동이 감지되었습니다.")
-                        is_speaking = True
-                    silence_counter = 0
-                else:
-                    if is_speaking:
-                        silence_counter += 1
-                        # 짧은 무음은 허용 (말하는 중간의 짧은 멈춤)
-                        if silence_counter >= silence_threshold:
-                            logger.info("🔇 음성 활동이 종료되었습니다.")
-                            is_speaking = False
-                            silence_counter = 0
-
-                # 실제 음성 데이터 전송
-                yield indata, status
-
-    except Exception as e:
-        logger.error(f"❌ 마이크 스트림 오류: {e}")
-    finally:
-        logger.info("🔇 마이크 스트림을 정리합니다.")
-
-
-async def write_chunks(stream):
-    stream_ended = False
-    try:
-        async for chunk, status in mic_stream_with_vad(SAMPLE_RATE, CHUNK_SIZE):
-            if shutdown_event.is_set():
-                break
-            await stream.input_stream.send_audio_event(audio_chunk=chunk)
-    except Exception as e:
-        logger.error(f"❌ 청크 전송 오류: {e}")
-    finally:
-        if not stream_ended:
-            try:
-                await stream.input_stream.end_stream()
-                stream_ended = True
-                logger.info("✅ 입력 스트림이 정상적으로 종료되었습니다.")
-            except Exception as e:
-                if "completed" not in str(e).lower():
-                    logger.warning(f"⚠️ 스트림 종료 중 오류: {e}")
-                else:
-                    logger.info("ℹ️ 스트림이 이미 종료되었습니다.")
-                stream_ended = True
-
-    return stream_ended
+                    is_wake_word_detected = False  # 응답 처리 완료 시 웨이크워드 상태 초기화
+                    logger.info("▶️ 음성 입력을 재개합니다. 웨이크워드를 기다립니다.")
 
 
 async def basic_transcribe(

@@ -31,6 +31,14 @@ logger.info("Environment configuration", environment=ENVIRONMENT)
 VOICE_ID = os.environ.get("VOICE_ID", "Seoyeon")  # 지혜 목소리
 logger.info(f"VOICE_ID: {VOICE_ID}")
 
+# Porcupine
+PORCUPINE_ACCESS_KEY = os.environ.get("PORCUPINE_ACCESS_KEY")
+if not PORCUPINE_ACCESS_KEY:
+    logger.warning("Porcupine access key is not set. Wake word detection will not work.")
+logger.info("Porcupine configuration", has_access_key=bool(PORCUPINE_ACCESS_KEY))
+PORCUPINE_WAKE_WORD = os.environ.get("PORCUPINE_WAKE_WORD", "jarvis")
+logger.info(f"PORCUPINE_WAKE_WORD: {PORCUPINE_WAKE_WORD}")
+
 
 @dataclass
 class Config:
@@ -40,6 +48,8 @@ class Config:
     lang_code: str
     environment: str
     voice_id: str
+    porcupine_access_key: Optional[str]
+    wake_word: str
 
 
 config = Config(
@@ -49,4 +59,6 @@ config = Config(
     lang_code=LANG_CODE,
     environment=ENVIRONMENT,
     voice_id=VOICE_ID,
+    porcupine_access_key=PORCUPINE_ACCESS_KEY,
+    wake_word=PORCUPINE_WAKE_WORD,
 )

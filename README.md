@@ -4,6 +4,7 @@ AWS의 음성 인식(Transcribe), 대화형 AI(Bedrock), 음성 합성(Polly) �
 
 ## 📋 기능
 
+- **웨이크워드 감지**: Picovoice Porcupine을 사용한 음성 활성화
 - **실시간 음성 인식**: AWS Transcribe를 통한 실시간 음성-텍스트 변환
 - **음성 활동 감지(VAD)**: Silero VAD 모델을 사용한 지능적 음성 구간 감지
 - **AI 대화**: AWS Bedrock의 Claude 모델을 통한 자연스러운 대화
@@ -18,6 +19,7 @@ AWS의 음성 인식(Transcribe), 대화형 AI(Bedrock), 음성 합성(Polly) �
   - AWS Bedrock (Claude LLM)
   - AWS Polly (음성 합성)
 - **음성 처리**:
+  - Picovoice Porcupine (웨이크워드 감지)
   - Silero VAD (음성 활동 감지)
   - SoundDevice (마이크 입력)
   - PyTorch (VAD 모델)
@@ -36,11 +38,8 @@ cd aws-stt-tts-example
 이 프로젝트는 Python 3.13 이상이 필요합니다.
 
 ```bash
-# uv를 사용한 의존성 설치
 uv sync
 
-# 또는 pip를 사용한 경우
-pip install -r requirements.txt
 ```
 
 ### 3. AWS 자격 증명 설정
@@ -76,6 +75,10 @@ VOICE_ID=Jihye
 
 # 환경 구분
 ENVIRONMENT=local
+
+# Porcupine 웨이크워드 설정
+PORCUPINE_ACCESS_KEY=your_access_key_here
+PORCUPINE_WAKE_WORD=computer
 ```
 
 ### 환경 변수 설명
@@ -86,6 +89,8 @@ ENVIRONMENT=local
 - `LANG_CODE`: 음성 인식 언어 코드 (`ko-KR`, `en-US` 등)
 - `VOICE_ID`: Polly TTS 음성 ID (`Seoyeon`, `Jihye` 등)
 - `ENVIRONMENT`: 실행 환경 구분
+- `PORCUPINE_ACCESS_KEY`: Picovoice Porcupine 웨이크워드 서비스 접근 키
+- `PORCUPINE_WAKE_WORD`: 웨이크워드 단어
 
 ## 🚀 사용법
 
@@ -102,12 +107,14 @@ uv run python main.py
 ### 사용 방법
 
 1. 애플리케이션을 실행하면 마이크가 활성화됩니다
-2. 음성으로 질문이나 대화를 시작하세요
-3. AI가 음성으로 응답합니다
-4. 연속적인 대화가 가능합니다
+2. "computer" 웨이크워드를 말하여 시스템을 활성화하세요
+3. 웨이크워드 감지 후 질문이나 대화를 시작하세요
+4. AI가 음성으로 응답합니다
+5. 응답이 끝나면 다시 웨이크워드를 기다립니다
 
 ### 주요 특징
 
+- **웨이크워드 활성화**: "computer" 웨이크워드로 시스템 활성화
 - **지능적 음성 감지**: VAD를 통해 음성 시작/종료를 자동으로 감지
 - **응답 중 입력 차단**: AI가 응답하는 동안 새로운 음성 입력을 일시 정지
 - **대화 맥락 유지**: 이전 대화 내용을 기억하여 자연스러운 대화 진행
