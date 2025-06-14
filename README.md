@@ -1,6 +1,6 @@
-# AWS STT-TTS 예제 🎤🤖🔊
+# Open Alexa 🎤🤖🔊
 
-AWS의 음성 인식(Transcribe), 대화형 AI(Bedrock), 음성 합성(Polly) 서비스를 활용한 실시간 음성 대화 시스템입니다.
+웨이크 워드(Wakeword)를 통해 음성 인식(Transcribe), 대화형 AI(Bedrock), 음성 합성(Polly) 서비스를 활용한 실시간 음성 대화 시스템입니다.
 
 ## 📋 기능
 
@@ -30,7 +30,7 @@ AWS의 음성 인식(Transcribe), 대화형 AI(Bedrock), 음성 합성(Polly) �
 
 ```bash
 git clone <repository-url>
-cd aws-stt-tts-example
+cd open-alexa
 ```
 
 ### 2. Python 환경 설정
@@ -77,8 +77,8 @@ VOICE_ID=Jihye
 ENVIRONMENT=local
 
 # Porcupine 웨이크워드 설정
-PORCUPINE_ACCESS_KEY=your_access_key_here
-PORCUPINE_WAKE_WORD=computer
+PORCUPINE_ACCESS_KEY="YOUR_ACCESS_KEY_HERE"
+PORCUPINE_WAKE_WORD="alexa" # default: "computer"
 ```
 
 ### 환경 변수 설명
@@ -107,14 +107,14 @@ uv run python main.py
 ### 사용 방법
 
 1. 애플리케이션을 실행하면 마이크가 활성화됩니다
-2. "computer" 웨이크워드를 말하여 시스템을 활성화하세요
+2. "alexa" 웨이크워드를 말하여 시스템을 활성화하세요
 3. 웨이크워드 감지 후 질문이나 대화를 시작하세요
 4. AI가 음성으로 응답합니다
 5. 응답이 끝나면 다시 웨이크워드를 기다립니다
 
 ### 주요 특징
 
-- **웨이크워드 활성화**: "computer" 웨이크워드로 시스템 활성화
+- **웨이크워드 활성화**: "alexa" 웨이크워드로 시스템 활성화
 - **지능적 음성 감지**: VAD를 통해 음성 시작/종료를 자동으로 감지
 - **응답 중 입력 차단**: AI가 응답하는 동안 새로운 음성 입력을 일시 정지
 - **대화 맥락 유지**: 이전 대화 내용을 기억하여 자연스러운 대화 진행
@@ -122,7 +122,7 @@ uv run python main.py
 ## 📁 프로젝트 구조
 
 ```
-aws-stt-tts-example/
+/
 ├── main.py                 # 메인 애플리케이션
 ├── src/
 │   ├── config.py          # 환경 설정 관리
@@ -133,12 +133,4 @@ aws-stt-tts-example/
 ├── pyproject.toml        # 프로젝트 설정 및 의존성
 ├── .env                  # 환경 변수 (생성 필요)
 └── README.md
-```
-
-### 의존성 관리
-
-이 프로젝트는 `uv`를 사용하여 의존성을 관리합니다:
-
-```bash
-uv sync
 ```

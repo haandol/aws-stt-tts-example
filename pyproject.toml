@@ -1,7 +1,7 @@
 [project]
-name = "aws-stt-tts-example"
+name = "open-alexa"
 version = "0.1.0"
-description = "Add your description here"
+description = "Open Alexa"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
