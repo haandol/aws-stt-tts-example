@@ -107,25 +107,37 @@ class PollyTTS:
                 # Polly PCM은 16-bit signed integer, mono, little-endian
                 audio_data = np.frombuffer(audio_stream, dtype=np.int16)
 
+                # 음성 끝에 약간의 무음 추가 (끝부분이 잘리는 현상 방지)
+                silence_samples = np.zeros(int(16000 * 0.5), dtype=np.int16)  # 0.5초 무음
+                audio_data = np.concatenate([audio_data, silence_samples])
+
                 # float32로 정규화 (-1.0 ~ 1.0 범위)
                 audio_data = audio_data.astype(np.float32) / 32768.0
 
                 # sounddevice로 직접 재생 (메모리 스트리밍)
-                sd.play(audio_data, samplerate=16000)
+                # 재생 완료 콜백 함수 추가
+                event = threading.Event()
+
+                def callback_finished(status):
+                    event.set()
+
+                sd.play(audio_data, samplerate=16000, blocking=False)
+
+                # 현재 스트림에 콜백 등록
+                current_stream = sd.get_stream()
+                if current_stream:
+                    current_stream.finished_callback = callback_finished
 
                 # 재생 완료까지 대기하되, 종료 신호 체크하면서 대기
                 import time
 
-                while sd.get_stream().active:
+                while not event.is_set() and sd.get_stream().active:
                     # 종료 신호 체크
                     if self._should_stop:
                         logger.info("🛑 종료 신호로 인해 음성 재생을 중단합니다.")
                         sd.stop()
                         break
                     time.sleep(0.1)  # 100ms마다 체크
-
-                if not self._should_stop:
-                    logger.info("✅ 음성 재생 완료")
 
                 # 재생이 정상적으로 완료되면 재생 상태를 False로 설정
                 self._is_playing = False
