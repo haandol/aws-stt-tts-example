@@ -14,7 +14,8 @@ alwaysApply: true
 │   ├── constant.py     # Constants and configuration values
 │   ├── llm.py         # LLM integration with AWS Bedrock
 │   ├── tts.py         # Text-to-speech using AWS Polly
-│   └── logger.py      # Logging configuration
+│   ├── logger.py      # Logging configuration
+│   └── tools/         # Assistant tools directory
 └── .env               # Environment variables (not tracked in git)
 ```
 
@@ -43,6 +44,11 @@ alwaysApply: true
    - `MyEventHandler`: Manages transcription events
    - Handles conversation flow and LLM integration
    - Manages TTS response generation
+
+5. Assistant Tools
+   - Located in `src/tools/` directory
+   - LangChain tools for various assistant functionalities
+   - Tools like `adjust_light.py` for environment control
 
 ### Asynchronous Operations
 - Uses asyncio for concurrent operations

@@ -3,7 +3,7 @@ description:
 globs: 
 alwaysApply: true
 ---
-# AWS STT-TTS Example Project Structure
+# Project Structure
 
 This project is a voice assistant application that uses AWS services for speech-to-text and text-to-speech functionality.
 
@@ -23,16 +23,18 @@ This project is a voice assistant application that uses AWS services for speech-
 - [src/llm.py](mdc:src/llm.py): AWS Bedrock LLM integration
 - [src/tts.py](mdc:src/tts.py): AWS Polly TTS implementation
 - [src/logger.py](mdc:src/logger.py): Logging configuration
+- @src/tools/: Directory connt tools
+  - @src/tools/adjust_light.py: Lightrol functionality
 
 ## Project Configuration
-- [pyproject.toml](mdc:pyproject.toml): Python project dependencies and metadata
-- [.env](mdc:.env): Environment variables (not tracked in git)
-- [.python-version](mdc:.python-version): Python version specification
+-  Python project dependencies and metadata
+- @.env: Environment tracked in git)
+- @.python-version: Pyrsion specification
 
-## Development Environment
-- [.devcontainer/](mdc:.devcontainer): Development container configuration
-- [.venv/](mdc:.venv): Python virtual environment
-- [env/](mdc:env): Additional environment files
+## DevelopEnvironment
+- @.devcontainer/: Development container configuration
+- @.venv/: Python virtual environment
+- @env/: Additional environment files
 
 ## Key Features
 1. Voice Activity Detection (VAD)
@@ -54,6 +56,11 @@ This project is a voice assistant application that uses AWS services for speech-
 5. Text-to-Speech
    - Uses AWS Polly for high-quality speech synthesis
    - Supports multiple voices and languages
+
+6. Assistant Tools
+   - LangChain tools for extended functionality
+   - Light control capability
+   - Easily extendable with new tools
 
 ## Usage
 1. Set up environment variables in `.env`

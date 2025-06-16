@@ -12,6 +12,7 @@ This is a voice assistant application that uses AWS services for speech-to-text 
 
 ### Core Files
 - [main.py](mdc:main.py) - The main entry point that orchestrates the voice assistant functionality
+- @src/tools/ - Directory containing assistant tools for enhanced functionality
 
 ### Key Features
 1. Wake Word Detection
@@ -34,6 +35,11 @@ This is a voice assistant application that uses AWS services for speech-to-text 
    - Uses AWS Bedrock for LLM responses
    - Maintains conversation history for context
 
+6. Assistant Tools
+   - Uses LangChain tools framework for extended functionality
+   - Includes tools like light control
+   - Easy to extend with additional tools
+
 ## Configuration
 The application uses environment variables for configuration, loaded through dotenv. Key configurations include:
 - AWS credentials and region
@@ -48,8 +54,9 @@ The application uses environment variables for configuration, loaded through dot
 3. When wake word is detected, starts listening for voice input
 4. Processes voice input through AWS Transcribe
 5. Sends transcribed text to LLM
-6. Converts LLM response to speech using Polly
-7. Returns to listening state
+6. The LLM may use assistant tools to perform actions
+7. Converts LLM response to speech using Polly
+8. Returns to listening state
 
 ## Error Handling
 - Graceful shutdown handling for SIGINT and SIGTERM
@@ -61,3 +68,4 @@ The application uses environment variables for configuration, loaded through dot
 - Implements proper resource cleanup
 - Includes comprehensive logging
 - Handles background tasks and cancellation properly
+- Easily extendable with new tools using LangChain framework
