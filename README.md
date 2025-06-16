@@ -14,9 +14,11 @@
 ## 🛠️ 기술 스택
 
 - **Python 3.13+**
+- **LLM**:
+  - LangGraph (LLM 래퍼)
 - **AWS 서비스**:
   - AWS Transcribe (음성 인식)
-  - AWS Bedrock (Claude LLM)
+  - AWS Bedrock (Claude 3.5 Haiku)
   - AWS Polly (음성 합성)
 - **음성 처리**:
   - Picovoice Porcupine (웨이크워드 감지)
@@ -78,7 +80,7 @@ ENVIRONMENT=local
 
 # Porcupine 웨이크워드 설정
 PORCUPINE_ACCESS_KEY="YOUR_ACCESS_KEY_HERE"
-PORCUPINE_WAKE_WORD="alexa" # default: "computer"
+PORCUPINE_WAKE_WORD="alexa" # default: "alexa"
 ```
 
 ### 환경 변수 설명
@@ -116,21 +118,22 @@ uv run python main.py
 
 - **웨이크워드 활성화**: "alexa" 웨이크워드로 시스템 활성화
 - **지능적 음성 감지**: VAD를 통해 음성 시작/종료를 자동으로 감지
-- **응답 중 입력 차단**: AI가 응답하는 동안 새로운 음성 입력을 일시 정지
+- **에이전트 기능**: 에이전트 툴을 통해 다양한 기능을 동작
 - **대화 맥락 유지**: 이전 대화 내용을 기억하여 자연스러운 대화 진행
 
 ## 📁 프로젝트 구조
 
 ```
 /
-├── main.py                 # 메인 애플리케이션
+├── main.py                # 메인 애플리케이션
 ├── src/
-│   ├── config.py          # 환경 설정 관리
-│   ├── constant.py        # 상수 정의
-│   ├── llm.py            # Bedrock LLM 래퍼
-│   ├── tts.py            # Polly TTS 래퍼
-│   └── logger.py         # 로깅 설정
-├── pyproject.toml        # 프로젝트 설정 및 의존성
-├── .env                  # 환경 변수 (생성 필요)
-└── README.md
+|   ├── tools/             # 에이전트 툴
+|   ├── config.py          # 환경 설정 관리
+|   ├── constant.py        # 상수 정의
+|   ├── llm.py             # Bedrock LLM 래퍼
+|   ├── tts.py             # Polly TTS 래퍼
+|   └── logger.py          # 로깅 설정
+├── pyproject.toml         # 프로젝트 설정 및 의존성
+├── .env                   # 환경 변수 (생성 필요)
+└── README.md              # 프로젝트 설명
 ```
