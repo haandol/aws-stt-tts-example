@@ -47,7 +47,7 @@ def signal_handler(signum, frame):
 
     # 전역 TTS 인스턴스가 있다면 즉시 재생 중지
     global tts_instance
-    if 'tts_instance' in globals() and tts_instance is not None:
+    if "tts_instance" in globals() and tts_instance is not None:
         tts_instance.stop_playback()
 
 
@@ -80,8 +80,7 @@ def detect_voice_activity(audio_chunk, threshold=0.5):
     """
     try:
         # int16 PCM 데이터를 float32로 변환 (-1.0 ~ 1.0 범위)
-        audio_float = np.frombuffer(
-            audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+        audio_float = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
 
         # VAD 모델 입력을 위해 torch tensor로 변환
         audio_tensor = torch.from_numpy(audio_float)
@@ -103,10 +102,7 @@ def initialize_porcupine():
     if porcupine is None:
         logger.info("🎯 Porcupine 웨이크워드 감지기를 초기화합니다...")
         try:
-            porcupine = pvporcupine.create(
-                access_key=config.porcupine_access_key,
-                keywords=[config.wake_word]
-            )
+            porcupine = pvporcupine.create(access_key=config.porcupine_access_key, keywords=[config.wake_word])
             logger.info("✅ Porcupine 웨이크워드 감지기가 초기화되었습니다.")
         except Exception as e:
             logger.error(f"❌ Porcupine 초기화 실패: {e}")
@@ -155,11 +151,12 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
     silence_counter = 0
     silence_threshold = 30  # 약 1초간 무음이면 음성 종료로 간주 (30 * 32ms)
     wake_word_cooldown = 0  # 웨이크워드 감지 후 일정 시간 동안 재감지 방지
+    force_listen_counter = 0  # 웨이크워드 후 강제 리스닝 카운터
+    post_wake_word_listen_seconds = 5  # 웨이크워드 후 최소 리스닝 시간 (초)
 
     def callback(indata, frame_count, time_info, status):
         if not shutdown_event.is_set():
-            loop.call_soon_threadsafe(
-                input_queue.put_nowait, (bytes(indata), status))
+            loop.call_soon_threadsafe(input_queue.put_nowait, (bytes(indata), status))
 
     stream = sounddevice.RawInputStream(
         channels=1,
@@ -172,6 +169,8 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
     try:
         with stream:
             logger.info("🎯 VAD가 활성화된 마이크 스트리밍을 시작합니다.")
+
+            post_wake_word_listen_chunks = int(post_wake_word_listen_seconds * sample_rate / chunk_size)
 
             while not shutdown_event.is_set():
                 try:
@@ -199,6 +198,7 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
                         is_wake_word_detected = True
                         is_speaking = True  # 웨이크워드 감지 시 바로 음성 활동 시작
                         wake_word_cooldown = 30  # 약 1초 동안 웨이크워드 재감지 방지
+                        force_listen_counter = post_wake_word_listen_chunks  # 강제 리스닝 시작
                         yield indata, status  # 웨이크워드 감지 직후의 음성 데이터도 전송
                         continue
                     else:
@@ -216,12 +216,15 @@ async def mic_stream_with_vad(sample_rate, chunk_size):
                     silence_counter = 0
                 else:
                     if is_speaking:
-                        silence_counter += 1
-                        if silence_counter >= silence_threshold:
-                            logger.info("🔇 음성 활동이 종료되었습니다.")
-                            is_speaking = False
-                            silence_counter = 0
-                            is_wake_word_detected = False  # 음성 종료 시 웨이크워드 상태 초기화
+                        if force_listen_counter > 0:
+                            force_listen_counter -= 1
+                        else:
+                            silence_counter += 1
+                            if silence_counter >= silence_threshold:
+                                logger.info("🔇 음성 활동이 종료되었습니다.")
+                                is_speaking = False
+                                silence_counter = 0
+                                is_wake_word_detected = False  # 음성 종료 시 웨이크워드 상태 초기화
 
                 # 실제 음성 데이터 전송
                 yield indata, status
@@ -316,8 +319,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                 try:
                     # 사용자 메시지 추가
-                    self.messages.append(
-                        {"role": "user", "content": user_input})
+                    self.messages.append({"role": "user", "content": user_input})
 
                     # LLM에 전체 대화 기록 전달
                     logger.info("🤖 LLM 처리 중...")
@@ -325,8 +327,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                     # AI 응답 추가
                     ai_response = response.content
-                    self.messages.append(
-                        {"role": "assistant", "content": ai_response})
+                    self.messages.append({"role": "assistant", "content": ai_response})
 
                     logger.info(f"🤖 AI: {ai_response}")
 
@@ -367,7 +368,7 @@ async def basic_transcribe(
         # Instantiate our handler and start processing events
         handler = MyEventHandler(stream.output_stream, llm, tts)
 
-                # 태스크들을 병렬로 실행하되 하나라도 완료되거나 종료 신호가 오면 정리
+        # 태스크들을 병렬로 실행하되 하나라도 완료되거나 종료 신호가 오면 정리
         write_task = asyncio.create_task(write_chunks(stream))
         handler_task = asyncio.create_task(handler.handle_events())
         shutdown_task = asyncio.create_task(wait_for_shutdown())
@@ -503,9 +504,7 @@ if __name__ == "__main__":
 
                 # 모든 태스크가 정리될 때까지 대기
                 try:
-                    loop.run_until_complete(
-                        asyncio.gather(*pending_tasks, return_exceptions=True)
-                    )
+                    loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
                 except Exception as e:
                     logger.warning(f"⚠️ 태스크 정리 중 오류: {e}")
 
