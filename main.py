@@ -272,12 +272,10 @@ class MyEventHandler(TranscriptResultStreamHandler):
         self.silence_counter = 0  # 무음 카운터
         self.silence_threshold = 30  # 무음 임계값 (약 1초 = 30 * 32ms)
         self.min_speech_chunks = 5  # 최소 음성 청크 수
-        self.messages = [
-            {
-                "role": "system",
-                "content": "당신은 유용한 AI 비서입니다. 모든 답변은 사용자의 언어로 답변해 주세요.",
-            }
-        ]
+        self.agent_config = {
+            "recursion_limit": 25,
+            "configurable": {"thread_id": "default"},
+        }
 
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
         global is_processing_response, is_wake_word_detected
@@ -318,18 +316,39 @@ class MyEventHandler(TranscriptResultStreamHandler):
                 logger.info("⏸️ 음성 입력을 일시 정지합니다.")
 
                 try:
-                    # 사용자 메시지 추가
-                    self.messages.append({"role": "user", "content": user_input})
-
-                    # LLM에 전체 대화 기록 전달
                     logger.info("🤖 LLM 처리 중...")
-                    response = await self.llm.model.ainvoke(self.messages)
+                    response = await self.llm.model.ainvoke(
+                        {"messages": [{"role": "user", "content": user_input}]},
+                        config=self.agent_config,
+                    )
 
-                    # AI 응답 추가
-                    ai_response = response.content
-                    self.messages.append({"role": "assistant", "content": ai_response})
+                    # AI 응답 추출 (LangGraph ReAct 에이전트 응답 형식 처리)
+                    # response는 AddableValuesDict 형태이므로 마지막 메시지를 추출
+                    if "messages" in response and response["messages"]:
+                        # 마지막 메시지 가져오기
+                        last_message = response["messages"][-1]
 
-                    logger.info(f"🤖 AI: {ai_response}")
+                        # 메시지에서 content 추출
+                        if hasattr(last_message, "content"):
+                            ai_response = last_message.content
+                        elif isinstance(last_message, dict) and "content" in last_message:
+                            ai_response = last_message["content"]
+                        else:
+                            # 응답 형식을 파악할 수 없는 경우
+                            logger.warning("⚠️ 알 수 없는 응답 형식입니다.")
+                            ai_response = str(last_message)
+                    else:
+                        # messages 키가 없는 경우 전체 응답을 문자열로 변환
+                        logger.warning("⚠️ 응답에서 messages를 찾을 수 없습니다.")
+                        ai_response = str(response)
+
+                    # 응답 로깅 (구조화된 응답 처리)
+                    if isinstance(ai_response, (list, dict)):
+                        # 구조화된 응답은 첫 30자만 로깅
+                        logger.info(f"🤖 AI: {str(ai_response)[:30]}...")
+                    else:
+                        # 일반 텍스트 응답
+                        logger.info(f"🤖 AI: {ai_response}")
 
                     # TTS로 AI 응답을 음성으로 재생
                     logger.info("🔊 음성 재생 시작...")

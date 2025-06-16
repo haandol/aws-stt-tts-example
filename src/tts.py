@@ -19,8 +19,7 @@ class PollyTTS:
             voice_id: 사용할 음성 ID
             aws_profile_name: AWS 프로파일 이름 (선택사항)
         """
-        logger.info("🔊 Polly TTS 초기화", voice_id=voice_id,
-                    aws_profile=aws_profile)
+        logger.info("🔊 Polly TTS 초기화", voice_id=voice_id, aws_profile=aws_profile)
 
         # AWS 세션 생성
         if aws_profile:
@@ -37,16 +36,37 @@ class PollyTTS:
 
         logger.info("✅ Polly TTS가 초기화되었습니다.")
 
-    async def speak_async(self, text: str) -> None:
+    async def speak_async(self, text) -> None:
         """
         비동기적으로 텍스트를 음성으로 변환하고 재생
 
         Args:
-            text: 변환할 텍스트
+            text: 변환할 텍스트 또는 구조화된 응답
         """
         try:
-            logger.info(
-                "🔊 음성 변환 시작", text=text[:50] + "..." if len(text) > 50 else text)
+            # 구조화된 응답(리스트나 딕셔너리)을 처리
+            if isinstance(text, (list, dict)):
+                # 리스트인 경우 텍스트 항목만 추출
+                if isinstance(text, list):
+                    text_parts = []
+                    for item in text:
+                        if isinstance(item, dict) and "type" in item and item["type"] == "text" and "text" in item:
+                            text_parts.append(item["text"])
+                    text = " ".join(text_parts)
+                # 딕셔너리인 경우 content 필드 추출
+                elif isinstance(text, dict) and "content" in text:
+                    text = text["content"]
+                else:
+                    # 알 수 없는 형식은 문자열로 변환
+                    logger.warning("⚠️ 구조화된 응답을 문자열로 변환합니다.")
+                    text = str(text)
+
+            # 빈 텍스트 체크
+            if not text:
+                logger.warning("⚠️ 음성 변환할 텍스트가 없습니다.")
+                return
+
+            logger.info("🔊 음성 변환 시작", text=text[:50] + "..." if len(text) > 50 else text)
 
             # 비동기 처리를 위해 별도 스레드에서 실행
             loop = asyncio.get_event_loop()
@@ -65,6 +85,10 @@ class PollyTTS:
         with self._play_lock:
             try:
                 self._is_playing = True
+
+                # 텍스트가 문자열인지 확인
+                if not isinstance(text, str):
+                    text = str(text)
 
                 # Polly로 음성 합성 (PCM 포맷으로 직접 출력)
                 response = self.polly_client.synthesize_speech(
@@ -91,6 +115,7 @@ class PollyTTS:
 
                 # 재생 완료까지 대기하되, 종료 신호 체크하면서 대기
                 import time
+
                 while sd.get_stream().active:
                     # 종료 신호 체크
                     if self._should_stop:
@@ -194,8 +219,7 @@ class PollyTTS:
 
             logger.info("🎵 사용 가능한 한국어 음성 목록:")
             for voice in voices:
-                logger.info(
-                    f"  - {voice['Name']} ({voice['Id']}) - {voice['Gender']}")
+                logger.info(f"  - {voice['Name']} ({voice['Id']}) - {voice['Gender']}")
 
             return voices
 
