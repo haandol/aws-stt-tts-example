@@ -317,38 +317,26 @@ class MyEventHandler(TranscriptResultStreamHandler):
 
                 try:
                     logger.info("🤖 LLM 처리 중...")
-                    response = await self.llm.model.ainvoke(
+
+                    # 스트리밍 응답 처리
+                    ai_response = None
+                    async for chunk in self.llm.model.astream(
                         {"messages": [{"role": "user", "content": user_input}]},
                         config=self.agent_config,
-                    )
+                        stream_mode=["values"],
+                    ):
+                        if "values" in chunk[0]:
+                            messages = chunk[1]["messages"]
+                            if messages:
+                                latest_message = messages[-1]
+                                latest_message.pretty_print()
+                                ai_response = latest_message.content
+                        await asyncio.sleep(0.05)
 
-                    # AI 응답 추출 (LangGraph ReAct 에이전트 응답 형식 처리)
-                    # response는 AddableValuesDict 형태이므로 마지막 메시지를 추출
-                    if "messages" in response and response["messages"]:
-                        # 마지막 메시지 가져오기
-                        last_message = response["messages"][-1]
-
-                        # 메시지에서 content 추출
-                        if hasattr(last_message, "content"):
-                            ai_response = last_message.content
-                        elif isinstance(last_message, dict) and "content" in last_message:
-                            ai_response = last_message["content"]
-                        else:
-                            # 응답 형식을 파악할 수 없는 경우
-                            logger.warning("⚠️ 알 수 없는 응답 형식입니다.")
-                            ai_response = str(last_message)
-                    else:
-                        # messages 키가 없는 경우 전체 응답을 문자열로 변환
-                        logger.warning("⚠️ 응답에서 messages를 찾을 수 없습니다.")
-                        ai_response = str(response)
-
-                    # 응답 로깅 (구조화된 응답 처리)
-                    if isinstance(ai_response, (list, dict)):
-                        # 구조화된 응답은 첫 30자만 로깅
-                        logger.info(f"🤖 AI: {str(ai_response)[:30]}...")
-                    else:
-                        # 일반 텍스트 응답
-                        logger.info(f"🤖 AI: {ai_response}")
+                    # 최종 응답 확인
+                    if ai_response is None:
+                        logger.warning("⚠️ 최종 응답을 추출할 수 없습니다.")
+                        ai_response = "죄송합니다, 응답을 생성하는 중 문제가 발생했습니다."
 
                     # TTS로 AI 응답을 음성으로 재생
                     logger.info("🔊 음성 재생 시작...")
